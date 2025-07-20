@@ -1,0 +1,137 @@
+Okay, let's create a GitHub Actions workflow YAML file that integrates Terraform testing, TFLint, Checkov, and Terraform Docs generation. This workflow assumes you have a Terraform project in your repository.This workflow will be triggered on pushes to the main branch and on pull requests targeting main.Here's the main.yml file you can place in your .github/workflows/ directory:name: Terraform CIon: push: branches: - main pull_request: branches: - mainpermissions: contents: read # Allow read access for checkout pull-requests: write # Allow writing comments for Checkovjobs: terraform_validate: runs-on: ubuntu-latest steps: - name: Checkout repository uses: actions/checkout@v4 - name: Setup Terraform uses: hashicorp/setup-terraform@v3 with: terraform_version: 1.x.x # Specify your desired Terraform version, e.g., 1.5.7 - name: Terraform fmt id: fmt run: terraform fmt -check -recursive continue-on-error: true # Allow subsequent steps to run even if fmt fails - name: Terraform Init id: init run: terraform init - name: Terraform Validate id: validate run: terraform validate -no-color - name: Output fmt results if: steps.fmt.outputs.stdout != '' run: echo "${{ steps.fmt.outputs.stdout }}" - name: Fail if Terraform fmt failed if: steps.fmt.outcome == 'failure' run: | echo "Terraform formatting failed. Please run 'terraform fmt' locally." exit 1 tflint: runs-on: ubuntu-latest steps: - name: Checkout repository uses: actions/checkout@v4 - name: Setup Terraform uses: hashicorp/setup-terraform@v3 with: terraform_version: 1.x.x # Match your Terraform version - name: Install TFLint run: | curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash sudo mv tflint /usr/local/bin/ - name: TFLint Init run: tflint --init - name: Run TFLint run: tflint --recursive checkov: runs-on: ubuntu-latest steps: - name: Checkout repository uses: actions/checkout@v4 - name: Install Checkov run: pip install checkov - name: Run Checkov # Adjust --directory to your Terraform code's root if not repository root run: checkov --directory . --output cli --output github_pr --compact env: GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Required for PR comments terraform_docs: runs-on: ubuntu-latest steps: - name: Checkout repository uses: actions/checkout@v4 - name: Install terraform-docs run: | go install github.com/terraform-docs/terraform-docs@v0.17.0 # Pin to a specific version sudo mv ~/go/bin/terraform-docs /usr/local/bin/ - name: Generate Terraform Docs id: docs run: | terraform-docs markdown table --output-file README.md --output-mode inject . continue-on-error: true # Allow subsequent steps - name: Create Pull Request for Docs Updates uses: peter-evans/create-pull-request@v6 if: github.ref == 'refs/heads/main' && steps.docs.outputs.changes != '' # Only on push to main and if changes with: token: ${{ secrets.GITHUB_TOKEN }} commit-message: "docs: Update Terraform documentation" branch: "terraform-docs-update" title: "Docs: Automated Terraform documentation update" body: "This is an automated pull request to update the Terraform documentation (README.md)." labels: documentation add-paths: README.mdExplanation of Each Job and Step:terraform_validate Job:This job performs the standard Terraform validation steps.Checkout repository: Checks out your GitHub repository content.Setup Terraform: Uses the hashicorp/setup-terraform action to install a specified version of Terraform. Important: Replace 1.x.x with the exact Terraform version you use (e.g., 1.5.7).Terraform fmt: Runs terraform fmt -check -recursive to ensure your Terraform code is formatted correctly.continue-on-error: true: This is crucial. It allows the workflow to continue to terraform init and terraform validate even if fmt fails. We'll explicitly fail the job later if fmt had issues.Terraform Init: Initializes your Terraform working directory. This downloads providers and modules.Terraform Validate: Validates the syntax and configuration of your Terraform files.Output fmt results: If terraform fmt found any unformatted files, this step will print the stdout of the fmt command, showing which files need formatting.Fail if Terraform fmt failed: This step explicitly checks if terraform fmt failed (steps.fmt.outcome == 'failure'). If it did, it prints a message and exits with a non-zero status, failing the terraform_validate job. This ensures that unformatted code prevents a successful CI run.tflint Job:This job runs TFLint for linting your Terraform code.Checkout repository: Same as above.Setup Terraform: Same as above, ensuring TFLint can find providers if needed.Install TFLint: Downloads and installs TFLint. The current version uses curl to fetch the installation script.TFLint Init: Initializes TFLint.Run TFLint: Executes TFLint recursively to check all Terraform files.checkov Job:This job uses Checkov for static analysis security checks on your Terraform.Checkout repository: Same as above.Install Checkov: Installs Checkov using pip.Run Checkov: Runs Checkov.--directory .: Specifies the root directory for scanning. Adjust this if your Terraform code is in a subdirectory (e.g., --directory terraform/).--output cli: Prints the results to the console.--output github_pr: This is very useful for PRs as it adds findings directly as comments on the pull request.--compact: Provides a more concise output.GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}: Checkov needs this token to post comments on pull requests. GITHUB_TOKEN is automatically provided by GitHub Actions.terraform_docs Job:This job generates and updates your README.md with Terraform module documentation.Checkout repository: Same as above.Install terraform-docs: Installs the terraform-docs tool. We're pinning to v0.17.0 for stability. You can change this version if needed.Generate Terraform Docs: Runs terraform-docs to inject documentation into README.md.--output-file README.md: Specifies the output file.--output-mode inject: This is important; it injects the documentation between and markers in your README.md. You need to add these markers to your README.md file.continue-on-error: true: Allows the job to continue even if no changes are detected (which isn't an error for terraform-docs, but good practice).Create Pull Request for Docs Updates:Uses peter-evans/create-pull-request@v6 action to automatically create a pull request if terraform-docs made any changes to README.md.if: github.ref == 'refs/heads/main' && steps.docs.outputs.changes != '': This condition ensures the PR is only created when pushing to main (not on PRs, to avoid infinite loops) and only if terraform-docs actually made changes.GITHUB_TOKEN: The default GITHUB_TOKEN is sufficient for creating PRs.branch: "terraform-docs-update": The name of the new branch for the PR.title, body, labels: Metadata for the PR.add-paths: README.md: Specifies the file to include in the PR.Before you use this workflow:Create .github/workflows/main.yml: Save the above content as main.yml (or any other name) inside the .github/workflows/ directory in your Git repository.Add Terraform Code: Ensure your repository contains Terraform .tf files.Add README.md with Markers: For terraform-docs to work, your README.md file (or whatever file you specify in --output-file) needs these markers:# My Terraform ModuleThis is a description of my Terraform module.Adjust Terraform Version: Change 1.x.x in setup-terraform@v3 to your specific Terraform version (e.g., 1.5.7).Adjust Checkov Directory: If your Terraform code is not at the root of your repository, modify the checkov --directory . command to point to the correct path (e.g., checkov --directory terraform/vpc).This comprehensive workflow will help you maintain high quality, secure, and well-documented Terraform code in your projects.
+
+name: Terraform CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read # Allow read access for checkout
+  pull-requests: write # Allow writing comments for Checkov
+
+jobs:
+  terraform_validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.x.x # Specify your desired Terraform version, e.g., 1.5.7
+
+      - name: Terraform fmt
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true # Allow subsequent steps to run even if fmt fails
+
+      - name: Terraform Init
+        id: init
+        run: terraform init
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Output fmt results
+        if: steps.fmt.outputs.stdout != ''
+        run: echo "${{ steps.fmt.outputs.stdout }}"
+
+      - name: Fail if Terraform fmt failed
+        if: steps.fmt.outcome == 'failure'
+        run: |
+          echo "Terraform formatting failed. Please run 'terraform fmt' locally."
+          exit 1
+
+  tflint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.x.x # Match your Terraform version
+
+      - name: Install TFLint
+        run: |
+          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+          sudo mv tflint /usr/local/bin/
+
+      - name: TFLint Init
+        run: tflint --init
+
+      - name: Run TFLint
+        run: tflint --recursive
+
+  checkov:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Checkov
+        run: pip install checkov
+
+      - name: Run Checkov
+        # Adjust --directory to your Terraform code's root if not repository root
+        run: checkov --directory . --output cli --output github_pr --compact
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Required for PR comments
+
+  terraform_docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install terraform-docs
+        run: |
+          go install github.com/terraform-docs/terraform-docs@v0.17.0 # Pin to a specific version
+          sudo mv ~/go/bin/terraform-docs /usr/local/bin/
+
+      - name: Generate Terraform Docs
+        id: docs
+        run: |
+          terraform-docs markdown table --output-file README.md --output-mode inject .
+        continue-on-error: true # Allow subsequent steps
+
+      - name: Create Pull Request for Docs Updates
+        uses: peter-evans/create-pull-request@v6
+        if: github.ref == 'refs/heads/main' && steps.docs.outputs.changes != '' # Only on push to main and if changes
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "docs: Update Terraform documentation"
+          branch: "terraform-docs-update"
+          title: "Docs: Automated Terraform documentation update"
+          body: "This is an automated pull request to update the Terraform documentation (README.md)."
+          labels: documentation
+          add-paths: README.md
+
+
+Checkout repository: Same as above.
+Install terraform-docs: Installs the terraform-docs tool. We're pinning to v0.17.0 for stability. You can change this version if needed.
+Generate Terraform Docs: Runs terraform-docs to inject documentation into README.md.
+--output-file README.md: Specifies the output file.
+--output-mode inject: This is important; it injects the documentation between and markers in your README.md. You need to add these markers to your README.md file.
+continue-on-error: true: Allows the job to continue even if no changes are detected (which isn't an error for terraform-docs, but good practice).
+Create Pull Request for Docs Updates:
+Uses peter-evans/create-pull-request@v6 action to automatically create a pull request if terraform-docs made any changes to README.md.
+if: github.ref == 'refs/heads/main' && steps.docs.outputs.changes != '': This condition ensures the PR is only created when pushing to main (not on PRs, to avoid infinite loops) and only if terraform-docs actually made changes.
+GITHUB_TOKEN: The default GITHUB_TOKEN is sufficient for creating PRs.
+branch: "terraform-docs-update": The name of the new branch for the PR.
+title, body, labels: Metadata for the PR.
+add-paths: README.md: Specifies the file to include in the PR.
+Create .github/workflows/main.yml: Save the above content as main.yml (or any other name) inside the .github/workflows/ directory in your Git repository.
+Add Terraform Code: Ensure your repository contains Terraform .tf files.
+Add README.md with Markers: For terraform-docs to work, your README.md file (or whatever file you specify in --output-file) needs these markers:
+# My Terraform Module
+This is a description of my Terraform module.
+Adjust Terraform Version: Change 1.x.x in setup-terraform@v3 to your specific Terraform version (e.g., 1.5.7).Adjust Checkov Directory: If your Terraform code is not at the root of your repository, modify the checkov --directory . command to point to the correct path (e.g., checkov --directory terraform/vpc).
